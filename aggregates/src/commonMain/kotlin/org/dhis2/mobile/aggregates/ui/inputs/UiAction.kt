@@ -1,57 +1,70 @@
 package org.dhis2.mobile.aggregates.ui.inputs
 
-sealed class UiAction {
-    data object OnNextClick : UiAction()
+sealed class UiAction(open val cellId: String) {
+    data class OnNextClick(
+        override val cellId: String,
+    ) : UiAction(cellId)
+
     data class OnFocusChanged(
+        override val cellId: String,
         val hasFocus: Boolean,
-    ) : UiAction()
+    ) : UiAction(cellId)
 
     data class OnValueChanged(
-        val cellId: String,
+        override val cellId: String,
         val newValue: String?,
-    ) : UiAction()
+    ) : UiAction(cellId)
 
     data class OnCaptureCoordinates(
-        val cellId: String,
-    ) : UiAction()
+        override val cellId: String,
+        val locationType: String,
+        val initialData: String?,
 
-    data class OnDateTimeAction(
-        val cellId: String,
-        val currentValue: String,
-    ) : UiAction()
+    ) : UiAction(cellId)
 
     data class OnEmailAction(
-        val cellId: String,
+        override val cellId: String,
         val email: String,
-    ) : UiAction()
+    ) : UiAction(cellId)
 
     data class OnSelectFile(
-        val cellId: String,
-    ) : UiAction()
-
-    data class OnOpenFile(
-        val cellId: String,
-    ) : UiAction()
+        override val cellId: String,
+    ) : UiAction(cellId)
 
     data class OnShareImage(
-        val cellId: String,
-    ) : UiAction()
+        override val cellId: String,
+        val filePath: String?,
+    ) : UiAction(cellId)
 
-    data class OnDownloadImage(
-        val cellId: String,
-    ) : UiAction()
+    data class OnDownloadFile(
+        override val cellId: String,
+        val filePath: String?,
+    ) : UiAction(cellId)
 
     data class OnAddImage(
-        val cellId: String,
-    ) : UiAction()
+        override val cellId: String,
+    ) : UiAction(cellId)
+
+    data class OnTakePhoto(
+        override val cellId: String,
+    ) : UiAction(cellId)
 
     data class OnCall(
-        val cellId: String,
+        override val cellId: String,
         val phoneNumber: String,
-    ) : UiAction()
+    ) : UiAction(cellId)
 
     data class OnLinkClicked(
-        val cellId: String,
+        override val cellId: String,
         val link: String,
-    ) : UiAction()
+    ) : UiAction(cellId)
+
+    data class OnOpenOrgUnitTree(
+        override val cellId: String,
+        val currentOrgUnitUid: String?,
+    ) : UiAction(cellId)
+
+    data class OnFetchOptions(
+        override val cellId: String,
+    ) : UiAction(cellId)
 }

@@ -1,12 +1,16 @@
 package org.dhis2.mobile.aggregates.model.mapper
 
-import org.dhis2.mobile.aggregates.domain.ResourceManager
+import androidx.compose.ui.graphics.toArgb
 import org.dhis2.mobile.aggregates.ui.inputs.CellIdGenerator.totalHeaderRowId
+import org.dhis2.mobile.aggregates.ui.provider.ResourceManager
+import org.hisp.dhis.mobile.ui.designsystem.component.LegendData
 import org.hisp.dhis.mobile.ui.designsystem.component.table.model.TableModel
 
 internal suspend fun TableModel.updateValue(
     cellId: String?,
     updatedValue: String?,
+    legendData: LegendData?,
+    error: String?,
     resourceManager: ResourceManager,
 ): TableModel {
     val hasTotalColumn = tableHeaderModel.extraColumns.isNotEmpty()
@@ -16,10 +20,14 @@ internal suspend fun TableModel.updateValue(
             tableCell.id == cellId
         }
         val totalsColumnCell =
-            tableRowModel.values.values.last().takeIf { hasTotalColumn }
+            tableRowModel.values.values.lastOrNull().takeIf { hasTotalColumn }
         if (cell != null) {
             val updatedValues = tableRowModel.values.toMutableMap()
-            updatedValues[cell.column] = cell.copy(value = updatedValue)
+            updatedValues[cell.column] = cell.copy(
+                value = updatedValue,
+                error = error,
+                legendColor = legendData?.color?.toArgb(),
+            )
             totalsColumnCell?.let { totalCell ->
                 val totalValue = updatedValues.values.toList().dropLast(1)
                     .sumOf { tableCell ->
@@ -36,7 +44,8 @@ internal suspend fun TableModel.updateValue(
     }
 
     return if (hasTotalRow) {
-        copy(tableRows = tableRows.dropLast(1)).withTotalsRow(resourceManager)
+        val totalRowIndex = tableRows.last().row()
+        copy(tableRows = tableRows.dropLast(1)).withTotalsRow(resourceManager, totalRowIndex)
     } else {
         copy(tableRows = tableRows)
     }

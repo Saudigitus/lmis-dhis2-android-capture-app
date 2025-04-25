@@ -1,8 +1,15 @@
 package org.dhis2.mobile.commons.data
 
 import org.dhis2.mobile.commons.model.internal.ValueInfo
+import org.dhis2.mobile.commons.resources.Res
+import org.dhis2.mobile.commons.resources.no
+import org.dhis2.mobile.commons.resources.yes
 import org.hisp.dhis.android.core.D2
+import org.hisp.dhis.android.core.arch.helpers.GeometryHelper
+import org.hisp.dhis.android.core.common.FeatureType
+import org.hisp.dhis.android.core.common.Geometry
 import org.hisp.dhis.android.core.common.ValueType
+import org.jetbrains.compose.resources.getString
 
 internal class ValueParserImpl(private val d2: D2) : ValueParser {
 
@@ -20,8 +27,22 @@ internal class ValueParserImpl(private val d2: D2) : ValueParser {
                 isDate = (valueType == ValueType.DATE) or (valueType == ValueType.AGE),
                 isDateTime = valueType == ValueType.DATETIME,
                 isTime = valueType == ValueType.TIME,
+                isCoordinate = valueType == ValueType.COORDINATE,
+                isBooleanType = valueType == ValueType.TRUE_ONLY || valueType == ValueType.BOOLEAN,
             )
         }
+
+    override suspend fun valueFromMultiTextAsOptionNames(
+        optionSetUid: String,
+        value: String,
+    ): String {
+        val options = d2.optionModule().options()
+            .byOptionSetUid().eq(optionSetUid)
+            .blockingGet().associate { it.code() to it.displayName() }
+        return value.split(",").map { optionCode ->
+            options[optionCode]
+        }.joinToString(",")
+    }
 
     override suspend fun valueFromOptionSetAsOptionName(
         optionSetUid: String,
@@ -30,17 +51,31 @@ internal class ValueParserImpl(private val d2: D2) : ValueParser {
         .byOptionSetUid().eq(optionSetUid)
         .byCode().eq(value).one().blockingGet()?.displayName() ?: value
 
+    override suspend fun valueFromCoordinateAsLatLong(value: String): String {
+        val geometry = Geometry.builder()
+            .coordinates(value)
+            .type(FeatureType.POINT)
+            .build()
+
+        return GeometryHelper.getPoint(geometry).let {
+            "Lat: ${it[1]}\nLong: ${it[0]}"
+        }
+    }
+    override suspend fun valueFromBooleanType(value: String): String {
+        return if (value == "true") getString(Res.string.yes) else getString(Res.string.no)
+    }
+
     override suspend fun valueFromOrgUnitAsOrgUnitName(value: String) =
         d2.organisationUnitModule().organisationUnits()
             .uid(value)
             .blockingGet()
             ?.displayName() ?: value
 
-    override suspend fun valueFromFileAsPath(value: String) =
+    override suspend fun valueToFileName(value: String) =
         d2.fileResourceModule().fileResources()
             .uid(value)
             .blockingGet()
-            ?.path() ?: value
+            ?.path()?.split("/")?.last() ?: value
 
     private fun getValueTypeAndOptionSetUid(uid: String) =
         trackedEntityAttribute(uid)

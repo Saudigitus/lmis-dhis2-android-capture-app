@@ -1,14 +1,13 @@
 package org.dhis2.mobile.aggregates.domain
 
+import kotlinx.coroutines.supervisorScope
 import org.dhis2.mobile.aggregates.data.DataSetInstanceRepository
+import org.dhis2.mobile.aggregates.data.OptionRepository
 import org.dhis2.mobile.aggregates.model.CellInfo
+import org.dhis2.mobile.aggregates.model.CellValueExtra
 import org.dhis2.mobile.aggregates.model.InputType
-import org.dhis2.mobile.aggregates.ui.inputs.TableId
-import org.dhis2.mobile.aggregates.ui.states.InputExtra
 import org.dhis2.mobile.commons.extensions.getFormattedFileSize
-import org.hisp.dhis.mobile.ui.designsystem.component.Coordinates
-import org.hisp.dhis.mobile.ui.designsystem.component.SelectableDates
-import org.hisp.dhis.mobile.ui.designsystem.component.model.DateTimeTransformation
+import org.dhis2.mobile.commons.extensions.userFriendlyValue
 
 internal class GetDataValueInput(
     private val dataSetUid: String,
@@ -16,13 +15,20 @@ internal class GetDataValueInput(
     private val orgUnitUid: String,
     private val attrOptionComboUid: String,
     private val repository: DataSetInstanceRepository,
+    private val optionRepository: OptionRepository,
 ) : ValueValidator(repository) {
     suspend operator fun invoke(
-        rowIds: List<TableId>,
-        columnIds: List<TableId>,
-    ): CellInfo {
-        val dataElementUid = checkOnlyOneDataElementIsProvided(rowIds, columnIds)
-        val categoryOptionComboUid = checkedCategoryOptionCombos(rowIds, columnIds)
+        dataElementUid: String,
+        categoryOptionComboUidData: Pair<String?, List<String>>,
+        fetchOptions: Boolean = false,
+    ): CellInfo = supervisorScope {
+        val categoryOptionComboUid =
+            categoryOptionComboUidData.first
+                ?: repository.categoryOptionComboFromCategoryOptions(
+                    dataSetUid,
+                    dataElementUid,
+                    categoryOptionComboUidData.second,
+                )
 
         val dataElementInfo = repository.dataElementInfo(
             dataSetUid = dataSetUid,
@@ -46,44 +52,58 @@ internal class GetDataValueInput(
             categoryOptionComboUid = categoryOptionComboUid,
         )
 
-        return CellInfo(
+        val legendColorAndLabel = repository.getLegend(
+            dataElementUid = dataElementUid,
+            periodId = periodId,
+            orgUnitUid = orgUnitUid,
+            categoryOptionComboUid = categoryOptionComboUid,
+            attrOptionComboUid = attrOptionComboUid,
+        )
+
+        CellInfo(
             label = dataElementInfo.label,
             value = value,
+            displayValue = value?.userFriendlyValue(dataElementUid),
             inputType = dataElementInfo.inputType,
             inputExtra = when (dataElementInfo.inputType) {
-                InputType.Age -> InputExtra.Age(
-                    selectableDates = SelectableDates("01011940", "12312300"),
-                )
-
-                InputType.Date, InputType.Time, InputType.DateTime ->
-                    InputExtra.Date(
-                        allowManualInput = true,
-                        is24HourFormat = true,
-                        visualTransformation = DateTimeTransformation(),
-                        selectableDates = SelectableDates("01011940", "12312300"),
-                        yearRange = IntRange(1940, 2300),
+                InputType.Coordinates -> value?.let {
+                    val (lat, long) = repository.getCoordinatesFrom(it)
+                    CellValueExtra.Coordinates(
+                        lat = lat,
+                        lon = long,
                     )
+                }
 
-                InputType.Coordinates -> InputExtra.Coordinate(
-                    coordinateValue = value?.let {
-                        val (lat, long) = repository.getCoordinatesFrom(it)
-                        Coordinates(
-                            latitude = lat,
-                            longitude = long,
+                InputType.MultiText, InputType.OptionSet -> {
+                    val optionCount = optionRepository.optionCount(dataElementUid)
+                    CellValueExtra.Options(
+                        optionCount = optionCount,
+                        options = if (fetchOptions || optionCount < 7) {
+                            optionRepository.options(dataElementUid)
+                        } else {
+                            emptyList()
+                        },
+                        optionsFetched = fetchOptions || optionCount < 7,
+                    )
+                }
+                InputType.FileResource, InputType.Image -> {
+                    value?.let {
+                        val filePath = repository.getFilePath(value)
+                        CellValueExtra.FileResource(
+                            filePath = filePath,
+                            fileWeight = filePath?.let { getFormattedFileSize(it) },
                         )
-                    },
-                )
+                    }
+                }
 
-                InputType.FileResource -> InputExtra.File(
-                    fileWeight = value?.let { getFormattedFileSize(value) },
-                )
-
-                else -> InputExtra.None
+                else -> null
             },
             supportingText = dataElementInfo.description?.let { listOf(it) } ?: emptyList(),
             errors = conflicts.first,
             warnings = conflicts.second,
             isRequired = dataElementInfo.isRequired,
+            legendColor = legendColorAndLabel?.first,
+            legendLabel = legendColorAndLabel?.second,
         )
     }
 }

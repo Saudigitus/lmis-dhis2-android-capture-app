@@ -1,6 +1,7 @@
 package org.dhis2.mobile.aggregates.model
 
 internal sealed class InputType {
+    data object OptionSet : InputType()
     data object Text : InputType()
     data object LongText : InputType()
     data object Letter : InputType()
@@ -29,4 +30,31 @@ internal sealed class InputType {
     data object Image : InputType()
     data object GeoJson : InputType()
     data object MultiText : InputType()
+
+    fun isText() = listOf(
+        Text,
+        LongText,
+        Letter,
+        Time,
+        Username,
+        Url,
+        PhoneNumber,
+        Email,
+    ).contains(this)
+
+    fun isNumeric() = listOf(
+        Integer,
+        IntegerPositive,
+        IntegerNegative,
+        IntegerZeroOrPositive,
+        Number,
+        UnitInterval,
+        Percentage,
+    ).contains(this)
+
+    fun isDate() = listOf(
+        Date,
+        DateTime,
+        Age,
+    ).contains(this)
 }

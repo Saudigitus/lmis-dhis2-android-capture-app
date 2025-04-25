@@ -3,15 +3,15 @@ kotlinxDatetime = "0.6.2"
 sdk = "35"
 minSdk = "21"
 vCode = "140"
-vName = "3.2.0-DEV"
+vName = "3.2.1-Dev"
 gradle = "8.8.0"
 kotlin = '2.0.21'
 hilt = '2.47'
 jacoco = '0.8.10'
-designSystem = "0.5.0-SNAPSHOT"
-dhis2sdk = "1.12.0-SNAPSHOT"
-ruleEngine = "3.3.2"
-expressionParser = "1.1.0"
+designSystem = "0.5.1-SNAPSHOT"
+dhis2sdk = "1.12.1-SNAPSHOT"
+ruleEngine = "3.3.9"
+expressionParser = "1.1.10"
 appcompat = "1.6.1"
 annotation = "1.6.0"
 cardview = "1.0.0"
@@ -29,6 +29,7 @@ recyclerview = "1.3.1"
 compose = "1.5.4"
 composePlugin = "1.7.3"
 composePaging = "3.3.0"
+pagingTesting = "3.3.0"
 composeLifecycle = "2.8.1"
 composeConstraintLayout = "1.0.1"
 activityCompose = "1.8.2"
@@ -59,7 +60,6 @@ root = "0.0.7"
 openid = "0.8.1"
 conscrypt = "2.5.2"
 gson = "2.9.0"
-#gsonconverter = "2.9.0"
 okhttp = "4.9.3"
 jodatime = "2.10.5"
 glide = "4.9.0"
@@ -92,7 +92,8 @@ koin = "4.0.2"
 lifecycleViewmodel = "2.8.7"
 androidx-navigation = "2.7.0"
 junitJupiter = "5.8.1"
-
+ktxml = "0.3.2"
+atomicfu = "0.27.0"
 [libraries]
 gradlePlugin = { group = "com.android.tools.build", name = "gradle", version.ref = "gradle" }
 kotlinPlugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlin" }
@@ -119,6 +120,7 @@ androidx-compose-uitooling = { group = "androidx.compose.ui", name = "ui-tooling
 androidx-compose-preview = { group = "androidx.compose.ui", name = "ui-tooling-preview", version.ref = "compose" }
 androidx-compose-viewbinding = { group = "androidx.compose.ui", name = "ui-viewbinding", version.ref = "compose" }
 androidx-compose-paging = { group = "androidx.paging", name = "paging-compose", version.ref = "composePaging" }
+test-androidx-paging = { group = "androidx.paging", name = "paging-testing", version.ref = "pagingTesting" }
 androidx-compose-lifecycle = { group = "androidx.lifecycle", name = "lifecycle-runtime-compose", version.ref = "composeLifecycle" }
 androidx-coreKtx = { group = "androidx.core", name = "core-ktx", version.ref = "corektx" }
 androidx-activity-compose = { group = "androidx.activity", name = "activity-compose", version.ref = "activityCompose" }
@@ -227,7 +229,8 @@ androidx-lifecycle-runtime-compose = { module = "org.jetbrains.androidx.lifecycl
 androidx-lifecycle-viewmodel-compose-kpm = { module = "org.jetbrains.androidx.lifecycle:lifecycle-viewmodel-compose", version.ref = "lifecycleViewmodel" }
 androidx-navigation-compose = { module = "org.jetbrains.androidx.navigation:navigation-compose", version.ref = "androidx-navigation" }
 junit-jupiter = { group = "org.junit.jupiter", name = "junit-jupiter", version.ref = "junitJupiter" }
-
+atomicfu = { module = "org.jetbrains.kotlinx:atomicfu", version.ref = "atomicfu" }
+ktxml = { module = "org.kobjects.ktxml:core", version.ref = "ktxml" }
 [plugins]
 kotlin-compose-compiler = { id = "org.jetbrains.kotlin.plugin.compose", version.ref = "kotlin" }
 kotlin-serialization = { id = "kotlinx-serialization" }

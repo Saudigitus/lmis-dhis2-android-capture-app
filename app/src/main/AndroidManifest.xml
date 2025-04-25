@@ -92,10 +92,6 @@
 
         <activity android:name=".usescases.datasets.datasetDetail.DataSetDetailActivity" />
         <activity android:name=".usescases.datasets.datasetInitial.DataSetInitialActivity" />
-        <activity
-            android:name=".usescases.datasets.dataSetTable.DataSetTableActivity"
-            android:configChanges="keyboardHidden|orientation|screenSize"
-            android:windowSoftInputMode="adjustResize" />
 
         <receiver
             android:name=".widgets.DhisCustomLauncher"
@@ -155,7 +151,9 @@
                 <action android:name="cat.ereza.customactivityoncrash.ERROR" />
             </intent-filter>
         </activity>
-        <activity android:name="org.dhis2.usescases.datasets.dataSetTable.DataSetInstanceActivity" />
+        <activity android:name="org.dhis2.usescases.datasets.dataSetTable.DataSetInstanceActivity"
+            android:windowSoftInputMode="adjustResize"
+            />
 
         <service
             android:name="androidx.work.impl.foreground.SystemForegroundService"

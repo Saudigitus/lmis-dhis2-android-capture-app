@@ -1,5 +1,8 @@
 package org.dhis2.mobile.aggregates.data
 
+import org.dhis2.commons.bindings.dataElement
+import org.dhis2.commons.periods.data.PeriodLabelProvider
+import org.dhis2.mobile.aggregates.data.mappers.toCustomTitle
 import org.dhis2.mobile.aggregates.data.mappers.toDataSetDetails
 import org.dhis2.mobile.aggregates.data.mappers.toDataSetSection
 import org.dhis2.mobile.aggregates.data.mappers.toInputType
@@ -9,21 +12,41 @@ import org.dhis2.mobile.aggregates.model.DataSetDetails
 import org.dhis2.mobile.aggregates.model.DataSetInstanceConfiguration
 import org.dhis2.mobile.aggregates.model.DataSetInstanceSectionConfiguration
 import org.dhis2.mobile.aggregates.model.DataSetRenderingConfig
+import org.dhis2.mobile.aggregates.model.DataToReview
+import org.dhis2.mobile.aggregates.model.InputType
 import org.dhis2.mobile.aggregates.model.MandatoryCellElements
+import org.dhis2.mobile.aggregates.model.PivoteMode
 import org.dhis2.mobile.aggregates.model.TableGroup
+import org.dhis2.mobile.aggregates.model.ValidationResultStatus
+import org.dhis2.mobile.aggregates.model.ValidationRulesResult
+import org.dhis2.mobile.aggregates.model.Violation
 import org.dhis2.mobile.aggregates.ui.constants.NO_SECTION_UID
+import org.dhis2.mobile.commons.files.FileController
+import org.dhis2.mobile.commons.validation.validators.FieldMaskValidator
 import org.hisp.dhis.android.core.D2
 import org.hisp.dhis.android.core.arch.helpers.GeometryHelper
 import org.hisp.dhis.android.core.arch.repositories.scope.RepositoryScope
+import org.hisp.dhis.android.core.category.CategoryCombo
+import org.hisp.dhis.android.core.category.CategoryOptionCombo
+import org.hisp.dhis.android.core.common.FeatureType
 import org.hisp.dhis.android.core.common.Geometry
 import org.hisp.dhis.android.core.common.State
 import org.hisp.dhis.android.core.common.ValueType
+import org.hisp.dhis.android.core.dataelement.DataElement
+import org.hisp.dhis.android.core.dataelement.DataElementOperand
 import org.hisp.dhis.android.core.dataset.DataSetEditableStatus
 import org.hisp.dhis.android.core.dataset.Section
+import org.hisp.dhis.android.core.dataset.SectionPivotMode
 import org.hisp.dhis.android.core.dataset.TabsDirection
+import org.hisp.dhis.android.core.maintenance.D2Error
+import org.hisp.dhis.android.core.validation.engine.ValidationResultViolation
+import java.io.File
+import java.util.Locale
 
 internal class DataSetInstanceRepositoryImpl(
     private val d2: D2,
+    private val periodLabelProvider: PeriodLabelProvider,
+    private val fileController: FileController,
 ) : DataSetInstanceRepository {
 
     override suspend fun getDataSetInstance(
@@ -42,6 +65,8 @@ internal class DataSetInstanceRepositoryImpl(
             .blockingGet()
             ?.isDefault
 
+        val dataSetDTOCustomTitle = dataSet?.displayOptions()?.customText()
+
         return d2.dataSetModule().dataSetInstances()
             .byDataSetUid().eq(dataSetUid)
             .byPeriod().eq(periodId)
@@ -49,10 +74,26 @@ internal class DataSetInstanceRepositoryImpl(
             .byAttributeOptionComboUid().eq(attrOptionComboUid)
             .blockingGet()
             .map { dataSetInstance ->
-                dataSetInstance.toDataSetDetails(isDefaultCatCombo = isDefaultCatCombo == true)
+                val period = d2.periodModule().periods().byPeriodId().eq(dataSetInstance.period())
+                    .one().blockingGet()
+
+                dataSetInstance.toDataSetDetails(
+                    periodLabel = period?.let {
+                        periodLabelProvider(
+                            periodType = period.periodType(),
+                            periodId = period.periodId()!!,
+                            periodStartDate = period.startDate()!!,
+                            periodEndDate = period.endDate()!!,
+                            locale = Locale.getDefault(),
+                        )
+                    } ?: dataSetInstance.period(),
+                    isDefaultCatCombo = isDefaultCatCombo == true,
+                    customText = dataSetDTOCustomTitle,
+                )
             }
             .firstOrNull() ?: DataSetDetails(
-            titleLabel = "",
+            customTitle = dataSetDTOCustomTitle.toCustomTitle(),
+            dataSetTitle = dataSet?.displayName()!!,
             dateLabel = periodId,
             orgUnitLabel = d2.organisationUnitModule().organisationUnits()
                 .uid(orgUnitUid)
@@ -71,6 +112,35 @@ internal class DataSetInstanceRepositoryImpl(
         .byDataSetUid().eq(dataSetUid)
         .blockingGet().map(Section::toDataSetSection)
 
+    override suspend fun isComplete(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attrOptionComboUid: String,
+    ): Boolean {
+        return d2.dataSetModule().dataSetCompleteRegistrations()
+            .byDataSetUid().eq(dataSetUid)
+            .byPeriod().eq(periodId)
+            .byOrganisationUnitUid().eq(orgUnitUid)
+            .byAttributeOptionComboUid().eq(attrOptionComboUid)
+            .byDeleted().isFalse
+            .isEmpty()
+            .map { isEmpty -> !isEmpty }.blockingGet()
+    }
+
+    override suspend fun areValidationRulesMandatory(dataSetUid: String): Boolean {
+        return d2.dataSetModule()
+            .dataSets().uid(dataSetUid)
+            .blockingGet()?.validCompleteOnly() ?: false
+    }
+
+    override suspend fun checkIfHasValidationRules(dataSetUid: String): Boolean {
+        return !d2.validationModule().validationRules()
+            .byDataSetUids(listOf(dataSetUid))
+            .bySkipFormValidation().isFalse
+            .blockingIsEmpty()
+    }
+
     override suspend fun getRenderingConfig(
         dataSetUid: String,
     ) = d2.dataSetModule().dataSets()
@@ -83,8 +153,12 @@ internal class DataSetInstanceRepositoryImpl(
         useVerticalTabs = true,
     )
 
-    override suspend fun categoryOptionCombinations(categoryUids: List<String>): List<String> {
+    private suspend fun categoryOptionCombinations(
+        categoryUids: List<String>,
+        pivotedCategoryUid: String?,
+    ): List<String> {
         return categoryUids.mapNotNull { categoryUid ->
+            if (categoryUid == pivotedCategoryUid) return@mapNotNull null
             val catOptions = d2.categoryModule().categories()
                 .withCategoryOptions()
                 .uid(categoryUid)
@@ -98,10 +172,14 @@ internal class DataSetInstanceRepositoryImpl(
                 }
             }
         }.mapNotNull { categoryOptions ->
-            d2.categoryModule().categoryOptionCombos()
-                .byCategoryOptions(categoryOptions)
-                .one()
-                .blockingGet()?.uid()
+            if (pivotedCategoryUid == null) {
+                d2.categoryModule().categoryOptionCombos()
+                    .byCategoryOptions(categoryOptions)
+                    .one()
+                    .blockingGet()?.uid()
+            } else {
+                categoryOptions.joinToString("_")
+            }
         }
     }
 
@@ -206,6 +284,7 @@ internal class DataSetInstanceRepositoryImpl(
                 DataSetInstanceSectionConfiguration(
                     showRowTotals = section.showRowTotals() == true,
                     showColumnTotals = section.showColumnTotals() == true,
+                    pivotedHeaderId = section.displayOptions()?.pivotedCategory(),
                 )
             }
 
@@ -247,40 +326,262 @@ internal class DataSetInstanceRepositoryImpl(
             }
         }
 
-        return d2.categoryModule().categoryCombos()
-            .byUid().`in`(catComboUids)
-            .withCategories()
-            .orderByDisplayName(RepositoryScope.OrderByDirection.ASC)
-            .blockingGet().map { catCombo ->
+        val sectionData = d2.dataSetModule().sections()
+            .uid(sectionUid)
+            .blockingGet()
+
+        val pivotedCategoryUid = sectionData?.displayOptions()?.pivotedCategory()
+        val disableGrouping = sectionData?.disableDataElementAutoGroup() == true
+        val pivoted = sectionData?.displayOptions()?.pivotMode() == SectionPivotMode.PIVOT
+
+        return if (disableGrouping) {
+            DisableDataElementGrouping(
+                dataSetElementsInSection.map {
+                    it.copy(
+                        categoryComboUid = it.categoryComboUid
+                            ?: dataElementCategoryComboUid(it.uid),
+                    )
+                },
+            ).mapIndexed { index, noGroupingDataSetElements ->
+                val mainCellElement = noGroupingDataSetElements.first()
+                val catComboUid = mainCellElement.categoryComboUid ?: dataElementCategoryComboUid(
+                    mainCellElement.uid,
+                )
+                val catCombo = d2.categoryModule().categoryCombos()
+                    .withCategories()
+                    .uid(catComboUid)
+                    .blockingGet()!!
+
+                val catComboHasPivotedCategory =
+                    catCombo.categories()?.any { it.uid() == pivotedCategoryUid } ?: false
+
+                val pivotedCategory = if (catComboHasPivotedCategory) {
+                    pivotedCategoryUid
+                } else {
+                    null
+                }
 
                 val subGroups = catCombo.categories()?.mapNotNull { it.uid() } ?: emptyList()
 
+                val tableTitle = tableTitle(catCombo, pivotedCategoryUid)
+
                 TableGroup(
-                    uid = catCombo.uid(),
-                    label = catCombo.displayName() ?: "",
-                    subgroups = catCombo.categories()?.mapNotNull { it.uid() } ?: emptyList(),
-                    cellElements = dataSetElementsInSection.filter { dataSetElement ->
+                    uid = "${catCombo.uid()}_$index",
+                    label = tableTitle ?: "",
+                    subgroups = subGroups,
+                    cellElements = noGroupingDataSetElements,
+                    headerRows = getTableGroupHeaders(catComboUid!!, subGroups, pivotedCategory),
+                    headerCombinations = categoryOptionCombinations(subGroups, pivotedCategory),
+                    pivotMode = when {
+                        pivoted ->
+                            PivoteMode.Transpose
+
+                        pivotedCategory != null ->
+                            PivoteMode.CategoryToColumn(
+                                pivotedHeaders(pivotedCategory),
+                            )
+
+                        else -> PivoteMode.None
+                    },
+                )
+            }
+        } else {
+            d2.categoryModule().categoryCombos()
+                .byUid().`in`(catComboUids)
+                .withCategories()
+                .orderByDisplayName(RepositoryScope.OrderByDirection.ASC)
+                .blockingGet().map { catCombo ->
+
+                    val subGroups = catCombo.categories()?.mapNotNull { it.uid() } ?: emptyList()
+                    val cellElements = dataSetElementsInSection.filter { dataSetElement ->
                         val catComboUid =
                             dataSetElement.categoryComboUid ?: dataElementCategoryComboUid(
                                 dataSetElement.uid,
                             )
                         catComboUid == catCombo.uid()
-                    },
-                    headerRows = getTableGroupHeaders(subGroups),
-                    headerCombinations = categoryOptionCombinations(subGroups),
-                )
+                    }
+
+                    val catComboHasPivotedCategory =
+                        catCombo.categories()?.any { it.uid() == pivotedCategoryUid } ?: false
+
+                    val pivotedCategory = if (catComboHasPivotedCategory) {
+                        pivotedCategoryUid
+                    } else {
+                        null
+                    }
+
+                    val tableTitle = tableTitle(catCombo, pivotedCategoryUid)
+
+                    TableGroup(
+                        uid = catCombo.uid(),
+                        label = tableTitle ?: "",
+                        subgroups = subGroups,
+                        cellElements = cellElements,
+                        headerRows = getTableGroupHeaders(
+                            catCombo.uid(),
+                            subGroups,
+                            pivotedCategory,
+                        ),
+                        headerCombinations = categoryOptionCombinations(
+                            subGroups,
+                            pivotedCategory,
+                        ),
+                        pivotMode = when {
+                            pivoted ->
+                                PivoteMode.Transpose
+
+                            pivotedCategory != null ->
+                                PivoteMode.CategoryToColumn(
+                                    pivotedHeaders(pivotedCategory),
+                                )
+
+                            else -> PivoteMode.None
+                        },
+                    )
+                }
+        }
+    }
+
+    private fun tableTitle(categoryCombo: CategoryCombo, pivotedCategoryUid: String?): String? {
+        return categoryCombo.displayName()
+            ?.takeIf {
+                val hasMoreThanOneCategory = (categoryCombo.categories()?.size ?: 0) > 1
+                val hasPivotedCategory = pivotedCategoryUid != null
+                val isDefaultCatCombo = categoryCombo.isDefault == true
+
+                hasMoreThanOneCategory and hasPivotedCategory.not() and isDefaultCatCombo.not()
             }
     }
 
-    override suspend fun getTableGroupHeaders(categoryUids: List<String>): List<List<String>> {
+    override suspend fun getInitialSectionToLoad(
+        openErrorLocation: Boolean,
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        catOptCombo: String,
+    ): Int {
+        return if (openErrorLocation) {
+            val sections = d2.dataSetModule().sections()
+                .byDataSetUid().eq(dataSetUid)
+                .withDataElements()
+                .blockingGet().associate {
+                    it.uid() to it.dataElements()?.map { dataElement -> dataElement.uid() }
+                }
+
+            val sectionWithError = d2.dataValueModule().dataValueConflicts()
+                .byDataSet(dataSetUid)
+                .byPeriod().eq(periodId)
+                .byOrganisationUnitUid().eq(orgUnitUid)
+                .byAttributeOptionCombo().eq(catOptCombo)
+                .blockingGet()?.mapNotNull { dataValueConflict ->
+                    dataValueConflict.dataElement()?.let { dataElementUid ->
+                        sections.filter { it.value?.contains(dataElementUid) == true }.keys
+                    }
+                }?.flatten()
+
+            return sectionWithError?.firstOrNull()?.let {
+                sections.keys.indexOf(it)
+            } ?: 0
+        } else {
+            0
+        }
+    }
+
+    private fun pivotedHeaders(pivotedCategoryUid: String?) = pivotedCategoryUid?.let {
+        d2.categoryModule().categories()
+            .withCategoryOptions()
+            .uid(it)
+            .blockingGet()
+            ?.categoryOptions()
+            ?.map { catOption ->
+                CellElement(
+                    uid = catOption.uid(),
+                    label = catOption.displayName() ?: catOption.uid(),
+                    description = catOption.displayName(),
+                    isMultiText = false,
+                    categoryComboUid = null,
+                )
+            }
+    } ?: emptyList()
+
+    override suspend fun getLegend(
+        dataElementUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        categoryOptionComboUid: String,
+        attrOptionComboUid: String,
+    ): Pair<ColorString?, LegendLabel?>? {
+        val dataElement = d2.dataElementModule().dataElements()
+            .uid(dataElementUid)
+            .blockingGet()
+        if (dataElement?.valueType()?.isNumeric != true) return null
+
+        val legendsSet = d2.dataElementModule().dataElements()
+            .withLegendSets()
+            .uid(dataElementUid)
+            .blockingGet()
+            ?.legendSets()
+
+        if (legendsSet.isNullOrEmpty()) return null
+
+        val value = d2.dataValueModule().dataValues()
+            .value(
+                period = periodId,
+                organisationUnit = orgUnitUid,
+                dataElement = dataElementUid,
+                categoryOptionCombo = categoryOptionComboUid,
+                attributeOptionCombo = attrOptionComboUid,
+            )
+            .blockingGet()
+            ?.value()?.toDoubleOrNull()
+
+        if (value == null) return null
+
+        val valueLegend = d2.legendSetModule().legends()
+            .byLegendSet().`in`(legendsSet.map { it.uid() })
+            .byStartValue().smallerThan(value)
+            .byEndValue().biggerOrEqualTo(value)
+            .one()
+            .blockingGet()
+
+        return Pair(valueLegend?.color(), valueLegend?.displayName())
+    }
+
+    private fun getTableGroupHeaders(
+        catComboUid: String,
+        categoryUids: List<String>,
+        pivotedCategoryUid: String?,
+    ): List<List<CellElement>> {
         return categoryUids.mapNotNull { categoryUid ->
-            d2.categoryModule().categories()
+            if (categoryUid == pivotedCategoryUid) return@mapNotNull null
+            val categoryOptions = d2.categoryModule().categories()
                 .withCategoryOptions()
                 .uid(categoryUid)
                 .blockingGet()
-                ?.categoryOptions()?.map { categoryOption ->
-                    categoryOption.displayName() ?: categoryOption.uid()
+                ?.categoryOptions() ?: emptyList()
+
+            if (categoryOptions.isNotEmpty()) {
+                categoryOptions.map { categoryOption ->
+                    CellElement(
+                        uid = categoryOption.uid(),
+                        label = categoryOption.displayName() ?: categoryOption.uid(),
+                        description = categoryOption.displayName(),
+                        isMultiText = false,
+                        categoryComboUid = catComboUid,
+                    )
                 }
+            } else {
+                d2.categoryModule().categoryOptionCombos().byCategoryComboUid().eq(categoryUid)
+                    .blockingGet().map {
+                        CellElement(
+                            uid = it.uid(),
+                            label = it.displayName() ?: it.uid(),
+                            description = it.displayName(),
+                            isMultiText = false,
+                            categoryComboUid = catComboUid,
+                        )
+                    }
+            }
         }
     }
 
@@ -289,14 +590,45 @@ internal class DataSetInstanceRepositoryImpl(
         orgUnitUid: String,
         dataElementUids: List<String>,
         attrOptionComboUid: String,
-    ) = d2.dataValueModule().dataValues()
-        .byPeriod().eq(periodId)
-        .byOrganisationUnitUid().eq(orgUnitUid)
-        .byAttributeOptionComboUid().eq(attrOptionComboUid)
-        .byDataElementUid().`in`(dataElementUids)
-        .blockingGet().map {
-            Pair(it.dataElement()!!, it.categoryOptionCombo()!!) to it.value()
-        }
+        pivotedCategoryUid: String?,
+    ): List<Pair<Pair<String, String>, String?>> {
+        val pivotedCategoryOptionUids = pivotedCategoryUid?.let {
+            d2.categoryModule().categories()
+                .withCategoryOptions()
+                .uid(pivotedCategoryUid)
+                .blockingGet()
+                ?.categoryOptions()?.map { it.uid() }
+        } ?: emptyList()
+
+        return d2.dataValueModule().dataValues()
+            .byDeleted().isFalse
+            .byPeriod().eq(periodId)
+            .byOrganisationUnitUid().eq(orgUnitUid)
+            .byAttributeOptionComboUid().eq(attrOptionComboUid)
+            .byDataElementUid().`in`(dataElementUids)
+            .blockingGet().map {
+                val key = if (pivotedCategoryUid.isNullOrEmpty()) {
+                    Pair(it.dataElement()!!, it.categoryOptionCombo()!!)
+                } else {
+                    val catOptionsInCategoryCombo = d2.categoryModule().categoryOptionCombos()
+                        .withCategoryOptions()
+                        .uid(it.categoryOptionCombo())
+                        .blockingGet()
+                        ?.categoryOptions()
+                        ?.map { categoryOption -> categoryOption.uid() }
+                        ?: emptyList()
+                    val pivotedCategoryOptionUid =
+                        pivotedCategoryOptionUids.find { uid -> uid in catOptionsInCategoryCombo }
+                    val headerCategoryOptionsUids =
+                        catOptionsInCategoryCombo.filter { uid -> uid != pivotedCategoryOptionUid }
+                    Pair(
+                        "${it.dataElement()!!}_$pivotedCategoryOptionUid",
+                        headerCategoryOptionsUids.joinToString("_"),
+                    )
+                }
+                key to it.value()
+            }
+    }
 
     override suspend fun value(
         periodId: String,
@@ -305,6 +637,7 @@ internal class DataSetInstanceRepositoryImpl(
         dataElementUid: String,
         categoryOptionComboUid: String,
     ) = d2.dataValueModule().dataValues()
+        .byDeleted().isFalse
         .value(
             periodId,
             orgUnitUid,
@@ -331,20 +664,28 @@ internal class DataSetInstanceRepositoryImpl(
                 attributeOptionCombo = attrOptionComboUid,
             )
 
-        val validator = d2.dataElementModule().dataElements()
+        val dataElement = d2.dataElementModule().dataElements()
             .uid(dataElementUid).blockingGet()
-            ?.valueType()?.validator
+
+        val validator = dataElement?.valueType()?.validator
+        val fieldMask = dataElement?.fieldMask()
 
         return try {
             if (value.isNullOrEmpty()) {
                 valueRepository.blockingDeleteIfExist()
             } else {
                 val validValue = validator?.validate(value)?.getOrThrow()
+                fieldMask?.let { mask ->
+                    val fieldMaskValidation = FieldMaskValidator(mask).validate(value)
+                    if (fieldMaskValidation is org.hisp.dhis.android.core.arch.helpers.Result.Failure) {
+                        return Result.failure(fieldMaskValidation.failure)
+                    }
+                }
                 valueRepository.blockingSet(validValue)
             }
             Result.success(Unit)
-        } catch (e: Exception) {
-            Result.failure(e)
+        } catch (t: Throwable) {
+            Result.failure(t)
         }
     }
 
@@ -367,30 +708,49 @@ internal class DataSetInstanceRepositoryImpl(
                 it.dataElement()?.uid() == dataElementUid &&
                     it.categoryOptionCombo()?.uid() == categoryOptionComboUid
             } != null
-
-        val inputType = requireNotNull(dataElement?.valueType()?.toInputType())
+        val dataElementValueType = dataElement?.valueType()?.toInputType()
+        val inputType = requireNotNull(dataElementValueType).takeIf {
+            (it !is InputType.MultiText) && dataElement.optionSet()?.uid() == null
+        }
+            ?: if (dataElementValueType is InputType.MultiText) InputType.MultiText else InputType.OptionSet
 
         return DataElementInfo(
-            label = "${dataElement?.displayFormName()}/${categoryOptionCombo?.displayName()}",
+            label = getDataElementInfoLabel(dataElement, categoryOptionCombo),
             inputType = inputType,
-            description = dataElement?.displayDescription(),
+            description = dataElement.displayDescription(),
             isRequired = isMandatory,
         )
     }
 
     override suspend fun getCoordinatesFrom(coordinatesValue: String): Pair<Double, Double> {
-        val geometry = Geometry.builder().coordinates(coordinatesValue).build()
+        val geometry = Geometry.builder()
+            .coordinates(coordinatesValue)
+            .type(FeatureType.POINT)
+            .build()
         return GeometryHelper.getPoint(geometry).let {
             Pair(it[1], it[0])
         }
     }
 
-    override suspend fun categoryOptionComboFromCategoryOptions(categoryOptions: List<String>): String {
+    override suspend fun categoryOptionComboFromCategoryOptions(
+        dataSetUid: String,
+        dataElementUid: String,
+        categoryOptions: List<String>,
+    ): String {
+        val dataSetElement = d2.dataSetModule().dataSets()
+            .withDataSetElements().uid(dataSetUid).blockingGet()?.dataSetElements()
+            ?.find { it.dataElement().uid() == dataElementUid }
+        val categoryComboUid =
+            dataSetElement?.categoryCombo()?.uid() ?: d2.dataElement(dataElementUid)
+                ?.categoryComboUid()
         val categoryOptionCombos = d2.categoryModule().categoryOptionCombos()
+            .byCategoryComboUid().eq(categoryComboUid)
             .byCategoryOptions(categoryOptions)
             .blockingGet()
 
-        if (categoryOptionCombos.size != 1) throw IllegalStateException("More than one category option combo found")
+        if (categoryOptionCombos.isEmpty()) throw IllegalStateException("No category option combo found")
+        if (categoryOptionCombos.size > 1) throw IllegalStateException("More than one category option combo found")
+
         return categoryOptionCombos.first().uid()
     }
 
@@ -424,4 +784,208 @@ internal class DataSetInstanceRepositoryImpl(
                 ).toString()
         }.toSortedMap(compareBy { it })
         .takeIf { it.isNotEmpty() }
+
+    override suspend fun checkIfHasMissingMandatoryFields(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attributeOptionComboUid: String,
+    ): Boolean {
+        return d2.dataSetModule().dataSetInstanceService()
+            .blockingGetMissingMandatoryDataElementOperands(
+                dataSetUid = dataSetUid,
+                periodId = periodId,
+                organisationUnitUid = orgUnitUid,
+                attributeOptionComboUid = attributeOptionComboUid,
+            ).isNotEmpty()
+    }
+
+    override suspend fun checkIfHasMissingMandatoryFieldsCombination(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attributeOptionComboUid: String,
+    ): Boolean {
+        return d2.dataSetModule().dataSetInstanceService()
+            .blockingGetMissingMandatoryFieldsCombination(
+                dataSetUid = dataSetUid,
+                periodId = periodId,
+                organisationUnitUid = orgUnitUid,
+                attributeOptionComboUid = attributeOptionComboUid,
+            ).isNotEmpty()
+    }
+
+    override suspend fun completeDataset(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attributeOptionComboUid: String,
+    ): Result<Unit> {
+        return try {
+            d2.dataSetModule().dataSetCompleteRegistrations()
+                .value(periodId, orgUnitUid, dataSetUid, attributeOptionComboUid)
+                .blockingSet()
+            Result.success(Unit)
+        } catch (error: D2Error) {
+            Result.failure(error)
+        }
+    }
+
+    override suspend fun runValidationRules(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attrOptionComboUid: String,
+    ): ValidationRulesResult {
+        val result = d2.validationModule()
+            .validationEngine().validate(
+                dataSetUid,
+                periodId,
+                orgUnitUid,
+                attrOptionComboUid,
+            ).blockingGet()
+
+        return ValidationRulesResult(
+            ValidationResultStatus.valueOf(result.status().name),
+            mapViolations(
+                violations = result.violations(),
+                periodId = periodId,
+                orgUnitUid = orgUnitUid,
+                attrOptionComboUid = attrOptionComboUid,
+            ),
+        )
+    }
+
+    override suspend fun uploadFile(
+        path: String,
+        isImage: Boolean,
+    ): Result<String?> {
+        val file = if (isImage) {
+            fileController.resize(path)
+        } else {
+            File(path)
+        }
+        return try {
+            Result.success(d2.fileResourceModule().fileResources().blockingAdd(file))
+        } catch (e: Exception) {
+            Result.failure(e)
+        }
+    }
+
+    override suspend fun getFilePath(
+        fileUid: String,
+    ): String? {
+        return d2.fileResourceModule().fileResources().uid(fileUid).blockingGet()?.path()
+    }
+
+    private fun mapViolations(
+        violations: List<ValidationResultViolation>,
+        periodId: String,
+        orgUnitUid: String,
+        attrOptionComboUid: String,
+    ): List<Violation> {
+        return violations.map {
+            Violation(
+                it.validationRule().description(),
+                it.validationRule().instruction(),
+                mapDataElements(
+                    dataElementUids = it.dataElementUids(),
+                    periodId = periodId,
+                    orgUnitUid = orgUnitUid,
+                    attrOptionComboUid = attrOptionComboUid,
+                ),
+            )
+        }
+    }
+
+    private fun mapDataElements(
+        dataElementUids: MutableSet<DataElementOperand>,
+        periodId: String,
+        orgUnitUid: String,
+        attrOptionComboUid: String,
+    ): List<DataToReview> {
+        val dataToReview = arrayListOf<DataToReview>()
+        dataElementUids.mapNotNull { deOperand ->
+            d2.dataElementModule().dataElements()
+                .uid(deOperand.dataElement()?.uid())
+                .blockingGet()?.let {
+                    Pair(deOperand, it)
+                }
+        }.forEach { (deOperand, de) ->
+            val catOptCombos =
+                if (deOperand.categoryOptionCombo() != null) {
+                    d2.categoryModule().categoryOptionCombos()
+                        .byUid().like(deOperand.categoryOptionCombo()?.uid())
+                        .blockingGet()
+                } else {
+                    d2.categoryModule().categoryOptionCombos()
+                        .byCategoryComboUid().like(de.categoryComboUid())
+                        .blockingGet()
+                }
+            catOptCombos.forEach { catOptCombo ->
+                val value = if (d2.dataValueModule().dataValues()
+                        .value(
+                            periodId,
+                            orgUnitUid,
+                            de.uid(),
+                            catOptCombo.uid(),
+                            attrOptionComboUid,
+                        )
+                        .blockingExists() &&
+                    d2.dataValueModule().dataValues()
+                        .value(
+                            periodId,
+                            orgUnitUid,
+                            de.uid(),
+                            catOptCombo.uid(),
+                            attrOptionComboUid,
+                        )
+                        .blockingGet()?.deleted() != true
+                ) {
+                    d2.dataValueModule().dataValues()
+                        .value(
+                            periodId,
+                            orgUnitUid,
+                            de.uid(),
+                            catOptCombo.uid(),
+                            attrOptionComboUid,
+                        )
+                        .blockingGet()?.value() ?: "-"
+                } else {
+                    "-"
+                }
+                val isFromDefaultCatCombo = d2.categoryModule().categoryCombos()
+                    .uid(catOptCombo.categoryCombo()?.uid()).blockingGet()?.isDefault == true
+                dataToReview.add(
+                    DataToReview(
+                        de.uid(),
+                        de.displayFormName(),
+                        catOptCombo.uid(),
+                        catOptCombo.displayName(),
+                        value,
+                        isFromDefaultCatCombo,
+                    ),
+                )
+            }
+        }
+        return dataToReview
+    }
+
+    private fun getDataElementInfoLabel(
+        dataElement: DataElement,
+        coc: CategoryOptionCombo?,
+    ): String {
+        val isDefaultCategoryCombo = d2.categoryModule().categoryCombos()
+            .uid(coc?.categoryCombo()?.uid())
+            .blockingGet()
+            ?.isDefault ?: false
+
+        val dataElementLabel = dataElement.run { displayFormName() ?: displayName() ?: uid() }
+
+        return if (isDefaultCategoryCombo) {
+            dataElementLabel
+        } else {
+            "$dataElementLabel / ${coc?.displayName()}"
+        }
+    }
 }

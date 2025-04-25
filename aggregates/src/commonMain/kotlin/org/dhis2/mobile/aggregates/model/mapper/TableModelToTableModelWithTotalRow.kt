@@ -1,9 +1,8 @@
 package org.dhis2.mobile.aggregates.model.mapper
 
-import org.dhis2.mobile.aggregates.domain.ResourceManager
 import org.dhis2.mobile.aggregates.ui.inputs.CellIdGenerator.totalCellId
 import org.dhis2.mobile.aggregates.ui.inputs.CellIdGenerator.totalHeaderRowId
-import org.dhis2.mobile.aggregates.ui.inputs.CellIdGenerator.totalId
+import org.dhis2.mobile.aggregates.ui.provider.ResourceManager
 import org.hisp.dhis.mobile.ui.designsystem.component.table.model.RowHeader
 import org.hisp.dhis.mobile.ui.designsystem.component.table.model.TableCell
 import org.hisp.dhis.mobile.ui.designsystem.component.table.model.TableModel
@@ -11,12 +10,12 @@ import org.hisp.dhis.mobile.ui.designsystem.component.table.model.TableRowModel
 
 internal suspend fun TableModel.withTotalsRow(
     resourceManager: ResourceManager,
+    absoluteRowIndex: Int,
 ) = this.copy(
     tableRows = tableRows + buildTotalsRow(
         tableId = id,
         columnCount = tableHeaderModel.tableMaxColumns(),
-        absoluteRowIndex = tableRows.size,
-        showRowTotals = true,
+        absoluteRowIndex = absoluteRowIndex,
         tableRows = tableRows,
         resourceManager = resourceManager,
     ),
@@ -26,7 +25,6 @@ private suspend fun buildTotalsRow(
     tableId: String,
     columnCount: Int,
     absoluteRowIndex: Int,
-    showRowTotals: Boolean,
     tableRows: List<TableRowModel>,
     resourceManager: ResourceManager,
 ) = TableRowModel(
@@ -36,6 +34,7 @@ private suspend fun buildTotalsRow(
             title = resourceManager.totalsHeader(),
             row = absoluteRowIndex,
             column = 0,
+            disabled = true,
         ),
     ),
     values = buildMap {
@@ -49,20 +48,6 @@ private suspend fun buildTotalsRow(
                     value = tableRows.sumOf {
                         it.values[columnIndex]?.value?.toDoubleOrNull()
                             ?: 0.0
-                    }.toString(),
-                    editable = false,
-                ),
-            )
-        }
-        if (showRowTotals) {
-            put(
-                key = columnCount,
-                value = TableCell(
-                    id = totalId(tableId),
-                    row = absoluteRowIndex,
-                    column = columnCount,
-                    value = this.values.sumOf {
-                        it.value?.toDoubleOrNull() ?: 0.0
                     }.toString(),
                     editable = false,
                 ),

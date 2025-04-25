@@ -8,7 +8,11 @@ import org.dhis2.mobile.aggregates.model.DataSetInstanceSectionConfiguration
 import org.dhis2.mobile.aggregates.model.DataSetRenderingConfig
 import org.dhis2.mobile.aggregates.model.DataSetSection
 import org.dhis2.mobile.aggregates.model.TableGroup
+import org.dhis2.mobile.aggregates.model.ValidationRulesResult
 import java.util.SortedMap
+
+typealias ColorString = String
+typealias LegendLabel = String
 
 internal interface DataSetInstanceRepository {
     suspend fun getDataSetInstance(
@@ -40,7 +44,14 @@ internal interface DataSetInstanceRepository {
         sectionUid: String,
     ): List<TableGroup>
 
-    suspend fun getTableGroupHeaders(categoryUids: List<String>): List<List<String>>
+    suspend fun getInitialSectionToLoad(
+        openErrorLocation: Boolean,
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        catOptCombo: String,
+    ): Int
+
     suspend fun dataSetInstanceSectionConfiguration(sectionUid: String): DataSetInstanceSectionConfiguration?
     suspend fun conflicts(
         dataSetUid: String,
@@ -50,8 +61,6 @@ internal interface DataSetInstanceRepository {
         dataElementUid: String,
         categoryOptionComboUid: String,
     ): Pair<List<String>, List<String>>
-
-    suspend fun categoryOptionCombinations(categoryUids: List<String>): List<String>
 
     suspend fun getDataSetIndicator(
         dataSetUid: String,
@@ -66,6 +75,7 @@ internal interface DataSetInstanceRepository {
         orgUnitUid: String,
         dataElementUids: List<String>,
         attrOptionComboUid: String,
+        pivotedCategoryUid: String?,
     ): List<Pair<Pair<String, String>, String?>>
 
     suspend fun dataElementInfo(
@@ -91,6 +101,61 @@ internal interface DataSetInstanceRepository {
         value: String?,
     ): Result<Unit>
 
-    suspend fun categoryOptionComboFromCategoryOptions(categoryOptions: List<String>): String
-    suspend fun getCoordinatesFrom(value: String): Pair<Double, Double>
+    suspend fun categoryOptionComboFromCategoryOptions(dataSetUid: String, dataElementUid: String, categoryOptions: List<String>): String
+
+    suspend fun getCoordinatesFrom(coordinatesValue: String): Pair<Double, Double>
+
+    suspend fun checkIfHasValidationRules(dataSetUid: String): Boolean
+
+    suspend fun areValidationRulesMandatory(dataSetUid: String): Boolean
+
+    suspend fun isComplete(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attrOptionComboUid: String,
+    ): Boolean
+
+    suspend fun checkIfHasMissingMandatoryFields(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attributeOptionComboUid: String,
+    ): Boolean
+
+    suspend fun checkIfHasMissingMandatoryFieldsCombination(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attributeOptionComboUid: String,
+    ): Boolean
+
+    suspend fun completeDataset(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attributeOptionComboUid: String,
+    ): Result<Unit>
+
+    suspend fun runValidationRules(
+        dataSetUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        attrOptionComboUid: String,
+    ): ValidationRulesResult
+
+    suspend fun getLegend(
+        dataElementUid: String,
+        periodId: String,
+        orgUnitUid: String,
+        categoryOptionComboUid: String,
+        attrOptionComboUid: String,
+    ): Pair<ColorString?, LegendLabel?>?
+
+    suspend fun uploadFile(
+        path: String,
+        isImage: Boolean,
+    ): Result<String?>
+
+    suspend fun getFilePath(fileUid: String): String?
 }

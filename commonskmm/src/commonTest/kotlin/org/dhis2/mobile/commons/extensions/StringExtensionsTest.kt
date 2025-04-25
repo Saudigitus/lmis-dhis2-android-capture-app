@@ -29,6 +29,7 @@ class StringExtensionsTest : KoinTest {
     private val expectedPath = "path"
     private val expectedPercentage = "10%"
     private val expectedValue = "Mary"
+    private val expectedBooleanValue = "yes"
 
     @Before
     fun setUp() = runTest {
@@ -48,11 +49,13 @@ class StringExtensionsTest : KoinTest {
             fileValueInfo,
             defaultValueInfo,
             percentageValueInfo,
+            booleanValueInfo,
         )
 
         whenever(valueParser.valueFromOptionSetAsOptionName(optionSetUid, "optionCode")) doReturn expectedOptionName
         whenever(valueParser.valueFromOrgUnitAsOrgUnitName("orgUnitUid")) doReturn expectedOrgUnitName
-        whenever(valueParser.valueFromFileAsPath("fileUid")) doReturn expectedPath
+        whenever(valueParser.valueToFileName("fileUid")) doReturn expectedPath
+        whenever(valueParser.valueFromBooleanType("true")) doReturn expectedBooleanValue
     }
 
     @After
@@ -86,6 +89,10 @@ class StringExtensionsTest : KoinTest {
             expected = expectedPercentage,
             actual = "10".userFriendlyValue(dataElementUid),
         )
+        assertEquals(
+            expected = expectedBooleanValue,
+            actual = "yes".userFriendlyValue(dataElementUid),
+        )
     }
 
     private val dateTimeValueInfo = ValueInfo(
@@ -100,6 +107,8 @@ class StringExtensionsTest : KoinTest {
         valueIsValidOption = false,
         valueIsAValidOrgUnit = false,
         valueIsAValidFile = false,
+        isCoordinate = false,
+        isBooleanType = false,
     )
     private val optionSetValueInfo = ValueInfo(
         isDateTime = false,
@@ -113,6 +122,8 @@ class StringExtensionsTest : KoinTest {
         valueIsValidOption = true,
         valueIsAValidOrgUnit = false,
         valueIsAValidFile = false,
+        isCoordinate = false,
+        isBooleanType = false,
     )
     private val orgUnitValueInfo = ValueInfo(
         isDateTime = false,
@@ -126,6 +137,8 @@ class StringExtensionsTest : KoinTest {
         valueIsValidOption = false,
         valueIsAValidOrgUnit = true,
         valueIsAValidFile = false,
+        isCoordinate = false,
+        isBooleanType = false,
     )
     private val fileValueInfo = ValueInfo(
         isDateTime = false,
@@ -139,6 +152,8 @@ class StringExtensionsTest : KoinTest {
         valueIsValidOption = false,
         valueIsAValidOrgUnit = false,
         valueIsAValidFile = true,
+        isCoordinate = false,
+        isBooleanType = false,
     )
     private val defaultValueInfo = ValueInfo(
         isDateTime = false,
@@ -152,6 +167,8 @@ class StringExtensionsTest : KoinTest {
         valueIsValidOption = false,
         valueIsAValidOrgUnit = false,
         valueIsAValidFile = false,
+        isCoordinate = false,
+        isBooleanType = false,
     )
 
     private val percentageValueInfo = ValueInfo(
@@ -166,5 +183,23 @@ class StringExtensionsTest : KoinTest {
         valueIsValidOption = false,
         valueIsAValidOrgUnit = false,
         valueIsAValidFile = false,
+        isCoordinate = false,
+        isBooleanType = false,
+    )
+
+    private val booleanValueInfo = ValueInfo(
+        isDateTime = false,
+        isDate = false,
+        isTime = false,
+        isPercentage = false,
+        isFile = false,
+        isOrganisationUnit = false,
+        isMultiText = false,
+        optionSetUid = null,
+        valueIsValidOption = false,
+        valueIsAValidOrgUnit = false,
+        valueIsAValidFile = false,
+        isCoordinate = false,
+        isBooleanType = false,
     )
 }
